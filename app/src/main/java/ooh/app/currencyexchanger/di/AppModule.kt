@@ -10,7 +10,9 @@ import okhttp3.logging.HttpLoggingInterceptor
 import ooh.app.currencyexchanger.data.api.ApiService
 import ooh.app.currencyexchanger.data.repository.CurrencyRepositoryImpl
 import ooh.app.currencyexchanger.domain.repository.CurrencyRepository
+import ooh.app.currencyexchanger.domain.usecase.GetCurrencyPairUseCase
 import ooh.app.currencyexchanger.domain.usecase.GetCurrencyRatesUseCase
+import ooh.app.currencyexchanger.domain.usecase.SaveCurrencyPairUseCase
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
@@ -58,5 +60,15 @@ object AppModule {
     @Provides
     fun provideGetCurrencyRatesUseCase(repo: CurrencyRepository): GetCurrencyRatesUseCase {
         return GetCurrencyRatesUseCase(repo)
+    }
+
+    @Provides
+    fun provideGetCurrencyPairsUseCase(repo: CurrencyRepository): GetCurrencyPairUseCase {
+        return GetCurrencyPairUseCase(repo)
+    }
+
+    @Provides
+    fun provideSaveCurrencyPairUseCase(repo: CurrencyRepository): SaveCurrencyPairUseCase {
+        return SaveCurrencyPairUseCase(repo)
     }
 }

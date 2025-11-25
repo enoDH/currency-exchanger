@@ -1,18 +1,21 @@
 package ooh.app.currencyexchanger.presentation.viewModal
 
-import android.annotation.SuppressLint
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ooh.app.currencyexchanger.domain.model.CurrencyInfo
+import kotlinx.coroutines.withContext
+import ooh.app.currencyexchanger.domain.model.CurrencyPair
 import ooh.app.currencyexchanger.domain.usecase.CalculateExchangeRateUseCase
+import ooh.app.currencyexchanger.domain.usecase.GetCurrencyPairUseCase
 import ooh.app.currencyexchanger.domain.usecase.GetCurrencyRatesUseCase
+import ooh.app.currencyexchanger.domain.usecase.SaveCurrencyPairUseCase
 import ooh.app.currencyexchanger.presentation.ui.home.HomeUiState
 import javax.inject.Inject
 import kotlin.math.round
@@ -20,12 +23,13 @@ import kotlin.math.round
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val currencyUseCase: GetCurrencyRatesUseCase,
-    private val calculateExchangeRateUseCase: CalculateExchangeRateUseCase
-) :
-    ViewModel() {
+    private val calculateExchangeRateUseCase: CalculateExchangeRateUseCase,
+    private val saveCurrencyPairUseCase: SaveCurrencyPairUseCase,
+    private val getCurrencyPairUseCase: GetCurrencyPairUseCase
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
-    private var _currencyInfo = MutableStateFlow(CurrencyInfo())
+    private val _pairs = MutableStateFlow(emptyList<CurrencyPair>())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
@@ -38,69 +42,51 @@ class HomeViewModel @Inject constructor(
             runCatching {
                 currencyUseCase.fetchCurrencyRatesByCode(_uiState.value.baseCurrency)
             }.onSuccess { currencies ->
-                _currencyInfo.update {
-                    currencies
-                }
                 _uiState.update {
                     it.copy(
                         baseCodes = currencies.rates.map { (key, value) -> key },
-                        targetRate = currencies.rates[_uiState.value.targetCurrency]!!.toDouble()
+                        targetRate = currencies.rates[_uiState.value.targetCurrency]!!.toDouble(),
+                        currencyRates = currencies
                     )
                 }
             }.onFailure { e ->
                 Log.e("TEST_CURRENCY", e.message.toString())
             }
 
-
-            _currencyInfo.update {
-                it.copy(
-                    currencyUseCase.fetchCurrencyRatesByCode(_uiState.value.baseCurrency).toString()
-                )
-            }
-
-            Log.e(
-                "TEST_CURRENCY",
-                currencyUseCase.fetchCurrencyRatesByCode(_uiState.value.baseCurrency).toString()
-            )
             changeBaseAmount(_uiState.value.baseAmount)
         }
     }
 
-    @SuppressLint("DefaultLocale")
     fun changeBaseAmount(amount: Double) {
         _uiState.update {
             it.copy(
-                baseAmount = round(amount * 100) / 100,
-                targetAmount = round(
+                baseAmount = round(amount * 100) / 100, targetAmount = round(
                     calculateExchangeRateUseCase.exchange(
-                        amount,
-                        _uiState.value.targetRate,
-                        true
+                        amount, _uiState.value.targetRate, true
                     ) * 100
                 ) / 100
             )
         }
     }
 
-    @SuppressLint("DefaultLocale")
     fun changeTargetAmount(amount: Double) {
         _uiState.update {
             it.copy(
                 baseAmount = round(
                     calculateExchangeRateUseCase.exchange(
-                        amount,
-                        _uiState.value.targetRate,
-                        false
+                        amount, _uiState.value.targetRate, false
                     ) * 100
-                ) / 100,
-                targetAmount = round(amount * 100) / 100
+                ) / 100, targetAmount = round(amount * 100) / 100
             )
         }
     }
 
     fun changeBaseCurrency(code: String) {
         _uiState.update {
-            it.copy(baseCurrency = code)
+            it.copy(
+                baseCurrency = code,
+                showButtonSave = true
+            )
         }
 
         fetch()
@@ -108,7 +94,10 @@ class HomeViewModel @Inject constructor(
 
     fun changeTargetCurrency(code: String) {
         _uiState.update {
-            it.copy(targetCurrency = code)
+            it.copy(
+                targetCurrency = code,
+                showButtonSave = true
+            )
         }
 
         fetch()
@@ -125,4 +114,86 @@ class HomeViewModel @Inject constructor(
             it.copy(targetCurrencyExpand = !_uiState.value.targetCurrencyExpand)
         }
     }
+
+    fun savePair() {
+        viewModelScope.launch {
+            saveCurrencyPairUseCase.saveCurrencyPair(
+                CurrencyPair(
+                    baseCurrency = _uiState.value.baseCurrency,
+                    targetCurrency = _uiState.value.targetCurrency
+                )
+            )
+
+            _uiState.update {
+                it.copy(
+                    showButtonSave = false
+                )
+            }
+
+            getPairs()
+        }
+    }
+
+    fun displayFavoritePairs() {
+        _uiState.update {
+            it.copy(
+                displayFavoritePairs = true
+            )
+        }
+        getPairs()
+    }
+
+    fun displayPairs() {
+        _uiState.update {
+            it.copy(
+                displayFavoritePairs = false
+            )
+        }
+    }
+
+    private fun getPairs() {
+        viewModelScope.launch {
+            _pairs.update {
+                getCurrencyPairUseCase.getCurrencyPairs()
+            }
+
+            fetchCurrencyPairs()
+        }
+    }
+
+    private fun fetchCurrencyPairs() {
+        viewModelScope.launch {
+            val pairs: MutableList<CurrencyPair> = mutableListOf()
+
+            _pairs.value.forEach {
+                pairs.add(
+                    CurrencyPair(
+                        baseCurrency = it.baseCurrency,
+                        targetCurrency = it.targetCurrency,
+                        targetRate = pairRate(it.baseCurrency, it.targetCurrency)
+                    )
+                )
+            }
+
+            _uiState.update {
+                it.copy(
+                    pairs = pairs.toList()
+                )
+            }
+        }
+
+    }
+
+    private suspend fun pairRate(base: String, target: String): Double {
+        return runCatching {
+            withContext(Dispatchers.IO) {
+                currencyUseCase.fetchCurrencyRatesByCode(base)
+            }
+        }.fold(onSuccess = { currencies ->
+            currencies.rates[target] ?: 0.0
+        }, onFailure = { e ->
+            0.0
+        })
+    }
+
 }
