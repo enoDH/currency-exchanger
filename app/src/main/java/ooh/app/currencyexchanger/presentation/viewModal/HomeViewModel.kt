@@ -38,6 +38,7 @@ class HomeViewModel @Inject constructor(
 
     private fun fetch() {
         viewModelScope.launch {
+            getPairs()
 
             runCatching {
                 currencyUseCase.fetchCurrencyRatesByCode(_uiState.value.baseCurrency)
